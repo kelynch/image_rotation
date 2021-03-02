@@ -1,0 +1,80 @@
+#!/bin/bash
+
+# There's enough going on here that we're just going to leave this in a
+# separate file.
+
+file=$1
+
+TMP="/tmp/pulfa/img_harvester/rotation-calc"
+# Clean up if there are files from the last run
+# (leaving them around is handy for debugging)
+if [ -d $TMP ]; then
+	rm -r $TMP
+fi
+mkdir $TMP
+
+# Dependencies:
+# convert: apt-get install imagemagick
+# ocrad: sudo apt-get install ocrad
+
+ASPELL="aspell"
+AWK="awk"
+BASENAME="basename"
+CONVERT="convert"
+DIRNAME="dirname"
+HEAD="head"
+OCRAD="ocrad" # apt-get install ocrad
+SORT="sort"
+WC="wc"
+
+# Make 90 degree variants of the input file. The input file is north
+file_name=$(basename $file)
+north_file="$TMP/$file_name-north"
+east_file="$TMP/$file_name-east"
+south_file="$TMP/$file_name-south"
+west_file="$TMP/$file_name-west"
+
+# TODO: despeckle doesn't seem to help. Anything else from imagemagick?
+
+cp  $file $north_file
+$CONVERT -rotate 90 $file $east_file
+$CONVERT -rotate 180 $file $south_file
+$CONVERT -rotate 270 $file $west_file
+
+# OCR each.
+north_text="$north_file.txt"
+east_text="$east_file.txt"
+south_text="$south_file.txt"
+west_text="$west_file.txt"
+
+$OCRAD -f -F utf8 $north_file -o $north_text
+$OCRAD -f -F utf8 $east_file -o $east_text
+$OCRAD -f -F utf8 $south_file -o $south_text
+$OCRAD -f -F utf8 $west_file -o $west_text
+
+# Get the word count for each txt file (least 'words' = least whitespace junk)
+wc_table="$TMP/wc_table"
+echo "$($WC -w $north_text) $north_file" > $wc_table
+echo "$($WC -w $east_text) $east_file" >> $wc_table
+echo "$($WC -w $south_text) $south_file" >> $wc_table
+echo "$($WC -w $west_text) $west_file" >> $wc_table
+
+# Take the bottom two; these are likely right side up and upside down, but
+# generally too close to call beyond that.
+bottom_two_wc_table="$TMP/bottom_two_wc_table"
+$SORT -n $wc_table | $HEAD -2 > $bottom_two_wc_table
+
+# Spellcheck. The lowest number of misspelled words is most likely the
+# correct orientation.
+misspelled_words_table="$TMP/misspelled_words_table"
+while read record; do
+	txt=$(echo $record | $AWK '{ print $2 }')
+	misspelled_word_count=$(cat $txt | $ASPELL -l en list | wc -w)
+	echo "$misspelled_word_count $record" >> $misspelled_words_table
+done < $bottom_two_wc_table
+
+# Do the sort, overwrite the input file, save out the text
+winner=$($SORT -n $misspelled_words_table | $HEAD -1)
+rotated_file=$(echo $winner | $AWK '{ print $4 }')
+
+mv $rotated_file $file
