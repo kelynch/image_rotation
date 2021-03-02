@@ -11,7 +11,7 @@ TMP="/tmp/pulfa/img_harvester/rotation-calc"
 if [ -d $TMP ]; then
 	rm -r $TMP
 fi
-mkdir $TMP
+mkdir -p $TMP
 
 # Dependencies:
 # convert: apt-get install imagemagick
